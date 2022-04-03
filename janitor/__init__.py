@@ -190,7 +190,16 @@ async def onCommandError(ctx: commands.Context, error: commands.errors.CommandEr
 	elif isinstance(error, commands.errors.MissingPermissions):
 		await ctx.reply(f"{error.args[0]}")
 	elif isinstance(error, commands.errors.CommandInvokeError):
-		await ctx.reply("Oopsie poopsie! I had a stroke trying to process that")
+		chain = []
+		head = error
+		while head is not None:
+			chain.append(type(head).__name__)
+			head = head.__cause__
+		chain.reverse()
+		await ctx.reply(
+			"Oopsie poopsie! I had a stroke trying to process that\n\n"
+			f"""Guru meditation:\n```\n{" -> ".join(chain)}\n{datetime.datetime.utcnow().isoformat(timespec="seconds")}Z\n```"""
+		)
 
 def makeBot():
 	intents = discord.Intents.default()
