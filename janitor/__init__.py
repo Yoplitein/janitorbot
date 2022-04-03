@@ -1,9 +1,34 @@
 import datetime
 import logging
 import os
+from typing import Optional
 
 import discord
 from discord.ext import commands, tasks
+
+from .db import isSweepEnabled, addChannel, removeChannel, getAllChannels, setMaxAge, getMaxAge
+
+def maxAgeRepr(maxAge):
+	seconds = maxAge * 60
+	days, seconds = divmod(seconds, 24 * 60 * 60)
+	hours, seconds = divmod(seconds, 60 * 60)
+	minutes, seconds = divmod(seconds, 60)
+	
+	ret = []
+	if days > 0: ret.append(f"{days} days")
+	if hours > 0: ret.append(f"{hours} hours")
+	if minutes > 0 or len(ret) == 0: ret.append(f"{minutes} minutes")
+	return ", ".join(ret)
+
+def findChannel(guild: discord.Guild, channel: int):
+	match = [x for x in guild.channels if x.id == channel]
+	match len(match):
+		case 0:
+			logging.warning(f"Channel id {channel} does not exist on its guild ({guild!r})")
+		case 1:
+			return match[0]
+		case _:
+			logging.error(f"Channel id {channel} is duplicated {len(match)} times in guild {guild!r}")
 
 async def reactionReply(ctx: commands.Context, emoji = "\u2705"):	
 	await ctx.message.add_reaction(emoji)
@@ -41,35 +66,67 @@ class Janitor(commands.Cog):
 				await channel.delete_messages(queue)
 				queue.clear()
 			queue.append(msg)
-		await channel.delete_messages(queue)
+		await channel.delete_messages(queue) # flush remainder
 		
 		await self.bot.change_presence(status = discord.Status.online, activity = None)
 	
 	@commands.group(help = "Manage list of channels that should be swept")
-	async def channel(self, ctx: commands.Context):
+	async def channels(self, ctx: commands.Context):
 		if ctx.invoked_subcommand is None:	
-			await ctx.reply("hmm")
+			raise commands.errors.UserInputError("Expected a subcommand")
 	
-	@channel.command()
+	@channels.command()
 	async def add(self, ctx: commands.Context, channel: discord.TextChannel):
-		await ctx.reply(f"todo1 {channel}")
+		if isSweepEnabled(channel.id):
+			await ctx.reply(f"I am already sweeping {channel.mention}")
+		else:
+			addChannel(channel.id, ctx.guild.id)
+			await reactionReply(ctx)
 	
-	@channel.command()
+	@channels.command()
 	async def remove(self, ctx: commands.Context, channel: discord.TextChannel):
-		await ctx.reply(f"todo2 {channel}")
+		if not isSweepEnabled(channel.id):
+			await ctx.reply(f"I am not currently sweeping {channel.mention}")
+		else:
+			removeChannel(channel.id)
+			await reactionReply(ctx)
 	
-	@channel.command()
+	@channels.command()
 	async def list(self, ctx: commands.Context):
-		await ctx.reply("todo3")
+		channels = list(filter(
+			lambda x: x is not None,
+			(findChannel(ctx.guild, id) for id in getAllChannels(ctx.guild.id))
+		))
+		if len(channels) > 0:
+			channelsStr = "\n\t".join(channel.mention for channel in channels)
+			await ctx.reply(f"""In `{ctx.guild.name}` I am configured to sweep:\n\t{channelsStr}""")
+		else:
+			await ctx.reply(f"I'm not configured to sweep any channels in `{ctx.guild.name}`")
 	
 	@commands.command()
-	async def maxage(self, ctx: commands.Context, ageSeconds: int):
-		await ctx.reply(f"todo4 {ageSeconds}")
+	async def maxage(self, ctx: commands.Context, ageMinutes: Optional[int]):
+		if not isSweepEnabled(ctx.channel.id):
+			await ctx.reply(f"Sweeping is not enabled for {ctx.channel.mention}")
+			return
+		
+		maxAge = None
+		if ageMinutes is None:
+			maxAge = getMaxAge(ctx.channel.id)
+		else:
+			maxAge = max(1, ageMinutes)
+			setMaxAge(ctx.channel.id, maxAge)
+		await ctx.reply(f"Messages in {ctx.channel.mention} will be deleted after {maxAgeRepr(maxAge)}")
 	
 	@commands.command()
-	async def sweepnow(self, ctx: commands.Context):
-		await self.sweepChannel(ctx.channel)
-		await reactionReply(ctx)
+	async def sweepnow(self, ctx: commands.Context, ignoreAge: Optional[bool] = False):
+		if not isSweepEnabled(ctx.channel.id):
+			await ctx.reply(f"Sweeping is not enabled for {ctx.channel.mention}")
+			return
+		
+		async with ctx.channel.typing():
+			await self.sweepChannel(ctx.channel, ignoreAge)
+			if not ignoreAge: # message will have been deleted
+				await reactionReply(ctx)
 
 def makeBot():
 	intents = discord.Intents.default()
