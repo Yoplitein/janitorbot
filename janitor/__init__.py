@@ -96,6 +96,3 @@ def main(bot = None):
 			print("Define BOT_TOKEN in environment, or create token.txt in working directory", file = os.sys.stderr)
 			raise SystemExit(1)
 	bot.run(token)
-
-if __name__ == "__main__":
-	main()
