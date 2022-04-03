@@ -1,0 +1,4 @@
+*.code-*
+*.pyc
+/.vscode
+/token.txt
