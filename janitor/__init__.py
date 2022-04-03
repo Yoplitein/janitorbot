@@ -9,6 +9,8 @@ async def reactionReply(ctx: commands.Context, emoji = "\u2705"):
 	await ctx.message.add_reaction(emoji)
 
 class Janitor(commands.Cog):
+	maxBulkDeleteMessages = 100
+
 	def __init__(self, bot):
 		self.bot: commands.Bot = bot
 		
@@ -18,9 +20,9 @@ class Janitor(commands.Cog):
 	async def sweepTask(self):
 		print("sweep task")
 	
-	async def sweepChannel(self, channel: discord.TextChannel):
+	async def sweepChannel(self, channel: discord.TextChannel, ignoreAge = False):
 		now = datetime.datetime.utcnow()
-		td = datetime.timedelta(minutes=1)
+		maxAge = datetime.timedelta(minutes = getMaxAge(channel.id))
 		
 		await self.bot.change_presence(
 			status = discord.Status.dnd,
@@ -29,14 +31,13 @@ class Janitor(commands.Cog):
 		
 		msg: discord.Message
 		queue = []
-		async for msg in channel.history(limit = 1000):
-			# total += 1
+		async for msg in channel.history(limit = None):
 			if msg.pinned: continue
 			
 			age = now - msg.created_at
-			if age < td: continue
+			if not ignoreAge and age < maxAge: continue
 			
-			if len(queue) >= 90:
+			if len(queue) == self.maxBulkDeleteMessages:
 				await channel.delete_messages(queue)
 				queue.clear()
 			queue.append(msg)
